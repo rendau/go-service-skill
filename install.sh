@@ -24,5 +24,45 @@ for skill_path in "$REPO_DIR"/skills/*/; do
   echo "ok  $skill_name -> ${skill_path%/}"
 done
 
+# --- смежные скиллы, на которые опираются crud и golang-service ------------------
+# Они живут в других репозиториях, поэтому ставятся отдельно. Здесь только проверка.
+missing=()
+
+check_external() {
+  local name="$1"
+  local link="$TARGET_DIR/$name"
+
+  if [ -L "$link" ] && [ ! -e "$link" ]; then
+    echo "!!  $name — битый симлинк ($(readlink "$link"))"
+    missing+=("$name")
+  elif [ ! -e "$link" ]; then
+    echo "!!  $name — не установлен"
+    missing+=("$name")
+  else
+    echo "ok  $name (уже установлен)"
+  fi
+}
+
+echo
+echo "Смежные скиллы:"
+check_external mobone
+check_external golang-samber-lo
+
+if [ ${#missing[@]} -gt 0 ]; then
+  cat <<EOF
+
+ВНИМАНИЕ: скиллы crud и golang-service ссылаются на mobone и golang-samber-lo.
+Без них Claude не увидит правил repo-слоя (mobone.ModelStore) и работы с samber/lo.
+
+  # mobone — скилл лежит в самом репозитории библиотеки
+  git clone git@github.com:mechta-market/mobone.git ~/projects/mobone
+  ln -s ~/projects/mobone/.claude/skills/mobone $TARGET_DIR/mobone
+
+  # golang-samber-lo — из набора скиллов samber/cc-skills-golang
+  git clone https://github.com/samber/cc-skills-golang.git ~/projects/cc-skills-golang
+  ln -s ~/projects/cc-skills-golang/skills/golang-samber-lo $TARGET_DIR/golang-samber-lo
+EOF
+fi
+
 echo
 echo "Готово. Перезапустите Claude Code, чтобы скиллы подхватились."

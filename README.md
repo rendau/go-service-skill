@@ -8,6 +8,27 @@
 | [`crud`](skills/crud/SKILL.md) | Полный стек новой сущности: proto → domain model → domain service → repo (mobone/squirrel/pgx) → usecase → gRPC handler + DTO |
 | [`golang-service`](skills/golang-service/SKILL.md) | Конвенция модулей сервисного слоя `internal/service/<module>`: фасад, порты зависимостей, транспортные модели, HTTP-клиенты внешних систем |
 
+## Смежные скиллы
+
+Оба скилла этого репозитория ссылаются на два внешних скилла — поставьте и их, иначе Claude
+не увидит правил repo-слоя и работы с `samber/lo`.
+
+| Скилл | Про что | Откуда |
+|---|---|---|
+| `mobone` | Repo-слой на `mobone.ModelStore` — то, что `crud` использует в `repo/pg/` | [`mechta-market/mobone`](https://github.com/mechta-market/mobone), скилл лежит внутри репозитория библиотеки в `.claude/skills/mobone` |
+| `golang-samber-lo` | Функциональные хелперы `samber/lo` — `lo.Map`/`lo.Filter` в конвертерах DTO ↔ domain | [`samber/cc-skills-golang`](https://github.com/samber/cc-skills-golang), скилл в `skills/golang-samber-lo` |
+
+```bash
+git clone git@github.com:mechta-market/mobone.git ~/projects/mobone
+ln -s ~/projects/mobone/.claude/skills/mobone ~/.claude/skills/mobone
+
+git clone https://github.com/samber/cc-skills-golang.git ~/projects/cc-skills-golang
+ln -s ~/projects/cc-skills-golang/skills/golang-samber-lo ~/.claude/skills/golang-samber-lo
+```
+
+`install.sh` эти скиллы не ставит (они не наши), но проверяет их наличие и печатает
+эти же команды, если чего-то не хватает.
+
 ## Установка
 
 ```bash
@@ -27,7 +48,8 @@ CLAUDE_SKILLS_DIR=/путь/к/skills ./install.sh
 
 Скрипт идемпотентен: повторный запуск обновляет симлинки. Если по имени скилла уже лежит
 обычная папка (старая локальная копия), скрипт её не тронет — удалите или переименуйте её сами
-и запустите скрипт ещё раз.
+и запустите скрипт ещё раз. В конце скрипт проверяет [смежные скиллы](#смежные-скиллы)
+`mobone` и `golang-samber-lo` и подсказывает команды установки, если их нет.
 
 ### Только для одного проекта
 
