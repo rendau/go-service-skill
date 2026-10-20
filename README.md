@@ -15,7 +15,7 @@
 
 | Скилл | Про что | Откуда |
 |---|---|---|
-| `mobone` | Repo-слой на `mobone.ModelStore` — то, что `crud` использует в `repo/pg/` | [`mechta-market/mobone`](https://github.com/mechta-market/mobone), скилл лежит внутри репозитория библиотеки в `.claude/skills/mobone` |
+| `mobone` | Repo-слой на `mobone.ModelStore` — то, что `crud` использует в `repo/db/` | [`mechta-market/mobone`](https://github.com/mechta-market/mobone), скилл лежит внутри репозитория библиотеки в `.claude/skills/mobone` |
 | `golang-samber-lo` | Функциональные хелперы `samber/lo` — `lo.Map`/`lo.Filter` в конвертерах DTO ↔ domain | [`samber/cc-skills-golang`](https://github.com/samber/cc-skills-golang), скилл в `skills/golang-samber-lo` |
 
 ```bash

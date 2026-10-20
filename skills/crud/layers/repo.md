@@ -1,13 +1,13 @@
 # Layer: Repository — `internal/domain/<entity>/repo/db/`
 
-Доступ к PostgreSQL через mobone/squirrel/pgx.
+Доступ к PostgreSQL через mobone/squirrel/pgx. Справочник API `ModelStore` — в skill `mobone`.
 
 ## Файлы
 
 | Файл | Назначение |
 |---|---|
 | `repo.go` | `Repo` struct, `New()`, CRUD-методы |
-| `custom.go` | `getConditions`, `allowedSortFields`, кастомные запросы |
+| `custom.go` | `allowedSortFields`, `getConditions`, кастомные запросы |
 | `model/select.go` | модель чтения (value-типы) + `EncodeSelect` |
 | `model/upsert.go` | модель записи (pointer-типы) + `DecodeUpsert` |
 | `model/children.go` | вложенные модели jsonb-полей + их `encode/decode` (jsonb, подход 1 — см. ниже) |
@@ -18,55 +18,56 @@
 
 ## model/select.go — модель чтения + DTO
 
-- Поля **value-типы** (не указатели)
-- Nullable колонки в БД → `sql.NullString` / `sql.NullTime`
+- Поля **value-типы** (не указатели); `Id` — `<idType>`
+- Nullable колонки → `sql.NullString` / `sql.NullTime` / `sql.NullInt64`; в `EncodeSelect` берём
+  `.String` / `.Time` / `.Int64` (NULL → zero value в домене)
 - `EncodeSelect` — конвертер Select → domain.Main (сигнатура совместима с `lo.Map`)
 
 ```go
 package model
 
 import (
-    "time"
+	"time"
 
-    domainModel "github.com/<module>/internal/domain/<entity>/model"
+	domainModel "github.com/<module>/internal/domain/<entity>/model"
 )
 
 type Select struct {
-    Id         string
-    CreatedAt  time.Time
-    ModifiedAt time.Time
-    Active     bool
-    Name       string
+	Id         <idType>
+	CreatedAt  time.Time
+	ModifiedAt time.Time
+	Name       string
+	Active     bool
 }
 
 func (m *Select) ListColumnMap() map[string]any {
-    return map[string]any{
-        "id":          &m.Id,
-        "created_at":  &m.CreatedAt,
-        "modified_at": &m.ModifiedAt,
-        "active":      &m.Active,
-        "name":        &m.Name,
-    }
+	return map[string]any{
+		"id":          &m.Id,
+		"created_at":  &m.CreatedAt,
+		"modified_at": &m.ModifiedAt,
+		"name":        &m.Name,
+		"active":      &m.Active,
+	}
 }
 
 func (m *Select) PKColumnMap() map[string]any {
-    return map[string]any{"id": m.Id}
+	return map[string]any{"id": m.Id}
 }
 
 func (m *Select) DefaultSortColumns() []string {
-    return []string{"created_at DESC"}
+	return []string{"created_at DESC"}
 }
 
 // DTO
 
 func EncodeSelect(v *Select, _ int) *domainModel.Main {
-    return &domainModel.Main{
-        Id:         v.Id,
-        CreatedAt:  v.CreatedAt,
-        ModifiedAt: v.ModifiedAt,
-        Active:     v.Active,
-        Name:       v.Name,
-    }
+	return &domainModel.Main{
+		Id:         v.Id,
+		CreatedAt:  v.CreatedAt,
+		ModifiedAt: v.ModifiedAt,
+		Name:       v.Name,
+		Active:     v.Active,
+	}
 }
 ```
 
@@ -74,59 +75,98 @@ func EncodeSelect(v *Select, _ int) *domainModel.Main {
 
 ## model/upsert.go — модель записи + DTO
 
-- `PKId string` — публичный, не указатель; устанавливается в `repo.go` перед Update/Delete
-- `NewId <type>` — публичный; сюда `ModelStore.Create` пишет id новой записи через `ReturningColumnMap` (правило для всех сущностей с id; тип как у PK: `int64` для bigserial, `string` для text/uuid)
-- `CreateColumnMap` — **не включает** `id` (только бизнес-поля)
-- `UpdateColumnMap` — делегирует в `CreateColumnMap`
+- `PKId <idType>` — публичный, не указатель; ставится в `repo.go` перед Update/Delete (текущий id)
+- `NewId <idType>` — сюда `ModelStore.Create` пишет id новой записи через `ReturningColumnMap`.
+  `ReturningColumnMap` обязателен: он входит в `mobone.CreateModelI`
+- `CreateColumnMap` — только переданные (`!= nil`) поля: не переданное не попадает в INSERT и
+  получает DB-default. `created_at` пишется, только если передан (импорт)
+- `Id *<idType>` — только для кейсов PK 3–5 и смены PK; если передан, пишется в `id`
+- `UpdateColumnMap` — делегирует в `CreateColumnMap`. Поэтому PK меняется через Update, только
+  если в `Edit.Id` передали новое значение; по умолчанию `Decode<Entity>UpdateReq` его не заполняет
+- Nullable колонка: пустое значение пишем как NULL, иначе упадёт FK/unique (`nullIfEmpty`)
 - `DecodeUpsert` — конвертер domain.Edit → Upsert
 
 ```go
 package model
 
 import (
-    "time"
+	"time"
 
-    domainModel "github.com/<module>/internal/domain/<entity>/model"
+	domainModel "github.com/<module>/internal/domain/<entity>/model"
 )
 
 type Upsert struct {
-    PKId  string
-    NewId string // id новой записи, заполняется в Create через RETURNING (int64 для bigserial)
+	PKId  <idType>
+	NewId <idType> // id новой записи, заполняется в Create через RETURNING
 
-    ModifiedAt *time.Time
-    Active     *bool
-    Name       *string
+	// Id *<idType> — кейсы PK 3–5 и смена PK через PUT
+	CreatedAt  *time.Time
+	ModifiedAt *time.Time
+	Name       *string
+	Active     *bool
 }
 
 func (m *Upsert) CreateColumnMap() map[string]any {
-    result := make(map[string]any{}, 10)
-    if m.ModifiedAt != nil { result["modified_at"] = *m.ModifiedAt }
-    if m.Active != nil     { result["active"] = *m.Active }
-    if m.Name != nil       { result["name"] = *m.Name }
-    return result
+	result := make(map[string]any, 4)
+	// if m.Id != nil { result["id"] = *m.Id } ← кейсы PK 3–5 и смена PK
+	if m.CreatedAt != nil {
+		result["created_at"] = *m.CreatedAt
+	}
+	if m.ModifiedAt != nil {
+		result["modified_at"] = *m.ModifiedAt
+	}
+	if m.Name != nil {
+		result["name"] = *m.Name
+	}
+	if m.Active != nil {
+		result["active"] = *m.Active
+	}
+	return result
 }
 
 func (m *Upsert) UpdateColumnMap() map[string]any {
-    return m.CreateColumnMap()
+	return m.CreateColumnMap()
 }
 
 func (m *Upsert) PKColumnMap() map[string]any {
-    return map[string]any{"id": m.PKId}
+	return map[string]any{"id": m.PKId}
 }
 
 // ReturningColumnMap — Create использует RETURNING id, чтобы вернуть id новой записи
 func (m *Upsert) ReturningColumnMap() map[string]any {
-    return map[string]any{"id": &m.NewId}
+	return map[string]any{"id": &m.NewId}
 }
 
 // DTO
 
 func DecodeUpsert(v *domainModel.Edit) *Upsert {
-    return &Upsert{
-        ModifiedAt: v.ModifiedAt,
-        Active:     v.Active,
-        Name:       v.Name,
-    }
+	return &Upsert{
+		// Id: v.Id,
+		CreatedAt:  v.CreatedAt,
+		ModifiedAt: v.ModifiedAt,
+		Name:       v.Name,
+		Active:     v.Active,
+	}
+}
+```
+
+Nullable-колонка (например FK `brand_id text references brand(id)`, домен `BrandId string`):
+
+```go
+// select.go
+BrandId sql.NullString // ListColumnMap: "brand_id": &m.BrandId; EncodeSelect: v.BrandId.String
+
+// upsert.go
+if m.BrandId != nil {
+	result["brand_id"] = nullIfEmpty(*m.BrandId)
+}
+
+// nullIfEmpty — пустая строка в nullable-колонку пишется как NULL.
+func nullIfEmpty(v string) *string {
+	if v == "" {
+		return nil
+	}
+	return &v
 }
 ```
 
@@ -164,27 +204,25 @@ repo-копию вложенного типа (ту же структуру, н�
 package model
 
 import (
-    "github.com/samber/lo"
-
-    domainModel "github.com/<module>/internal/domain/<entity>/model"
+	domainModel "github.com/<module>/internal/domain/<entity>/model"
 )
 
 // item — repo-копия domainModel.Item с json-тегами для (де)сериализации jsonb-массива.
 type item struct {
-    ProductId string `json:"product_id"`
-    Title     string `json:"title"`
+	ProductId string `json:"product_id"`
+	Title     string `json:"title"`
 }
 
 func encodeItem(v item, _ int) *domainModel.Item {
-    return &domainModel.Item{ProductId: v.ProductId, Title: v.Title}
+	return &domainModel.Item{ProductId: v.ProductId, Title: v.Title}
 }
 
 func decodeItem(v *domainModel.Item, _ int) item {
-    return item{ProductId: v.ProductId, Title: v.Title}
+	return item{ProductId: v.ProductId, Title: v.Title}
 }
 ```
 
-Использование в `EncodeSelect`/`DecodeUpsert`: `lo.Map(v.Items, encodeItem)` и
+Использование в `EncodeSelect`/`DecodeUpsert` (там импортируется `lo`): `lo.Map(v.Items, encodeItem)` и
 `lo.Map(v.Items, decodeItem)`. В `CreateColumnMap` проверку заполнения слайса делай через
 `len(m.Field) > 0` (а не `!= nil`: `lo.Map` возвращает непустой пустой слайс).
 
@@ -193,19 +231,19 @@ func decodeItem(v *domainModel.Item, _ int) item {
 ```go
 // coordinates — одиночное jsonb-поле: nil-safe encode/decode (без сигнатуры под lo.Map).
 type coordinates struct {
-    Lat float64 `json:"lat"`
-    Lon float64 `json:"lon"`
+	Lat float64 `json:"lat"`
+	Lon float64 `json:"lon"`
 }
 
 func encodeCoordinates(v coordinates) domainModel.Coordinates {
-    return domainModel.Coordinates{Lat: v.Lat, Lon: v.Lon}
+	return domainModel.Coordinates{Lat: v.Lat, Lon: v.Lon}
 }
 
 func decodeCoordinates(v *domainModel.Coordinates) *coordinates {
-    if v == nil {
-        return nil
-    }
-    return &coordinates{Lat: v.Lat, Lon: v.Lon}
+	if v == nil {
+		return nil
+	}
+	return &coordinates{Lat: v.Lat, Lon: v.Lon}
 }
 ```
 
@@ -224,28 +262,28 @@ func decodeCoordinates(v *domainModel.Coordinates) *coordinates {
 
 // repo-локальная DTO: только она знает про формат хранения
 type metaJSON struct {
-    Color string   `json:"color"`
-    Tags  []string `json:"tags"`
+	Color string   `json:"color"`
+	Tags  []string `json:"tags"`
 }
 
 type Select struct {
-    Id   string
-    Meta []byte // jsonb-колонка читаем как []byte
+	Id   string
+	Meta []byte // jsonb-колонка читаем как []byte
 }
 
 func (m *Select) ListColumnMap() map[string]any {
-    return map[string]any{"id": &m.Id, "meta": &m.Meta}
+	return map[string]any{"id": &m.Id, "meta": &m.Meta}
 }
 
 func EncodeSelect(v *Select, _ int) *domainModel.Main {
-    out := &domainModel.Main{Id: v.Id}
-    if len(v.Meta) > 0 {
-        var meta metaJSON
-        _ = json.Unmarshal(v.Meta, &meta)
-        out.Color = meta.Color // доменные поля — без тегов
-        out.Tags = meta.Tags
-    }
-    return out
+	out := &domainModel.Main{Id: v.Id}
+	if len(v.Meta) > 0 {
+		var meta metaJSON
+		_ = json.Unmarshal(v.Meta, &meta)
+		out.Color = meta.Color // доменные поля — без тегов
+		out.Tags = meta.Tags
+	}
+	return out
 }
 ```
 
@@ -260,98 +298,95 @@ func EncodeSelect(v *Select, _ int) *domainModel.Main {
 package db
 
 import (
-    "context"
-    "fmt"
+	"context"
+	"fmt"
 
-    "github.com/<module>/internal/domain/<entity>/model"
-   
-    "github.com/jackc/pgx/v5/pgxpool"
-    "github.com/mechta-market/mobone/v2"
-    "github.com/samber/lo"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/mechta-market/mobone/v2"
+	moboneTools "github.com/mechta-market/mobone/v2/tools"
+	"github.com/samber/lo"
 
-    commonRepoPg "github.com/<module>/internal/domain/common/repo/pg"
-    moboneTools "github.com/mechta-market/mobone/v2/tools"
-    repoModel "github.com/<module>/internal/domain/<entity>/repo/db/model"
+	commonRepoPg "github.com/<module>/internal/domain/common/repo/pg"
+	"github.com/<module>/internal/domain/<entity>/model"
+	repoModel "github.com/<module>/internal/domain/<entity>/repo/db/model"
 )
 
 type Repo struct {
-    *commonRepoPg.Base
-    ModelStore *mobone.ModelStore
+	*commonRepoPg.Base
+	ModelStore *mobone.ModelStore
 }
 
 func New(con *pgxpool.Pool) *Repo {
-    base := commonRepoPg.NewBase(con)
-    return &Repo{
-        Base: base,
-        ModelStore: &mobone.ModelStore{
-            Con:       base.Con,
-            QB:        base.QB,
-            TableName: "<entity>", // имя таблицы всегда в единственном числе, без plural
-        },
-    }
+	base := commonRepoPg.NewBase(con)
+	return &Repo{
+		Base: base,
+		ModelStore: &mobone.ModelStore{
+			Con:       base.Con,
+			QB:        base.QB,
+			TableName: "<entity>", // имя таблицы всегда в единственном числе, без plural
+		},
+	}
 }
 
 func (r *Repo) List(ctx context.Context, pars *model.ListReq) ([]*model.Main, int64, error) {
-    conditions, conditionExps := r.getConditions(pars)
-    sort := moboneTools.ConstructSortColumns(allowedSortFields, pars.Sort)
-    items := make([]*repoModel.Select, 0)
+	conditions, conditionExps := r.getConditions(pars)
+	items := make([]*repoModel.Select, 0)
 
-    totalCount, err := r.ModelStore.List(ctx, mobone.ListParams{
-        Conditions:           conditions,
-        ConditionExpressions: conditionExps,
-        Page:                 pars.Page,
-        PageSize:             pars.PageSize,
-        WithTotalCount:       pars.WithTotalCount,
-        OnlyCount:            pars.OnlyCount,
-        Sort:                 sort,
-    }, func(add bool) mobone.ListModelI {
-        item := &repoModel.Select{}
-        if add {
-            items = append(items, item)
-        }
-        return item
-    })
-    if err != nil {
-        return nil, 0, fmt.Errorf("ModelStore.List: %w", err)
-    }
-    return lo.Map(items, repoModel.EncodeSelect), totalCount, nil
+	totalCount, err := r.ModelStore.List(ctx, mobone.ListParams{
+		Conditions:           conditions,
+		ConditionExpressions: conditionExps,
+		Page:                 pars.Page,
+		PageSize:             pars.PageSize,
+		WithTotalCount:       pars.WithTotalCount,
+		OnlyCount:            pars.OnlyCount,
+		Sort:                 moboneTools.ConstructSortColumns(allowedSortFields, pars.Sort),
+	}, func(add bool) mobone.ListModelI {
+		item := &repoModel.Select{}
+		if add {
+			items = append(items, item)
+		}
+		return item
+	})
+	if err != nil {
+		return nil, 0, fmt.Errorf("ModelStore.List: %w", err)
+	}
+	return lo.Map(items, repoModel.EncodeSelect), totalCount, nil
 }
 
-func (r *Repo) Get(ctx context.Context, id string) (*model.Main, bool, error) {
-    m := &repoModel.Select{Id: id}
-    found, err := r.ModelStore.Get(ctx, m)
-    if err != nil {
-        return nil, false, fmt.Errorf("ModelStore.Get: %w", err)
-    }
-    if !found {
-        return nil, false, nil
-    }
-    return repoModel.EncodeSelect(m, 0), true, nil
+func (r *Repo) Get(ctx context.Context, id <idType>) (*model.Main, bool, error) {
+	m := &repoModel.Select{Id: id}
+	found, err := r.ModelStore.Get(ctx, m)
+	if err != nil {
+		return nil, false, fmt.Errorf("ModelStore.Get: %w", err)
+	}
+	if !found {
+		return nil, false, nil
+	}
+	return repoModel.EncodeSelect(m, 0), true, nil
 }
 
-func (r *Repo) Create(ctx context.Context, obj *model.Edit) (string, error) {
-    m := repoModel.DecodeUpsert(obj)
-    if err := r.ModelStore.Create(ctx, m); err != nil {
-        return "", fmt.Errorf("ModelStore.Create: %w", err)
-    }
-    return m.NewId, nil // id новой записи (правило для всех сущностей с id)
+func (r *Repo) Create(ctx context.Context, obj *model.Edit) (<idType>, error) {
+	m := repoModel.DecodeUpsert(obj)
+	if err := r.ModelStore.Create(ctx, m); err != nil {
+		return <zeroId>, fmt.Errorf("ModelStore.Create: %w", err)
+	}
+	return m.NewId, nil
 }
 
-func (r *Repo) Update(ctx context.Context, id string, obj *model.Edit) error {
-    m := repoModel.DecodeUpsert(obj)
-    m.PKId = id
-    if err := r.ModelStore.Update(ctx, m); err != nil {
-        return fmt.Errorf("ModelStore.Update: %w", err)
-    }
-    return nil
+func (r *Repo) Update(ctx context.Context, id <idType>, obj *model.Edit) error {
+	m := repoModel.DecodeUpsert(obj)
+	m.PKId = id
+	if err := r.ModelStore.Update(ctx, m); err != nil {
+		return fmt.Errorf("ModelStore.Update: %w", err)
+	}
+	return nil
 }
 
-func (r *Repo) Delete(ctx context.Context, id string) error {
-    m := &repoModel.Upsert{PKId: id}
-    if err := r.ModelStore.Delete(ctx, m); err != nil {
-        return fmt.Errorf("ModelStore.Delete: %w", err)
-    }
-    return nil
+func (r *Repo) Delete(ctx context.Context, id <idType>) error {
+	if err := r.ModelStore.Delete(ctx, &repoModel.Upsert{PKId: id}); err != nil {
+		return fmt.Errorf("ModelStore.Delete: %w", err)
+	}
+	return nil
 }
 ```
 
@@ -359,56 +394,73 @@ func (r *Repo) Delete(ctx context.Context, id string) error {
 
 ## custom.go — фильтры, сортировка, сложные запросы
 
+- `allowedSortFields` — белый список для `ConstructSortColumns` (`sort: ["-name"]` → `name desc`);
+  пустой `Sort` → `DefaultSortColumns()`
+- `conditions` — точное совпадение и `IN`, `conditionExps` — выражения
+- Фильтр по списку ставь только если `pars.IDs != nil`: squirrel превращает **и пустой, и nil**
+  срез в `WHERE (1=0)`. Пустой срез под указателем — осознанное «ничего не найдено»
+
 ```go
 package db
 
 import (
-    sq "github.com/Masterminds/squirrel"
-    "github.com/<module>/internal/domain/<entity>/model"
+	"context"
+	"fmt"
+
+	sq "github.com/Masterminds/squirrel"
+
+	"github.com/<module>/internal/domain/<entity>/model"
 )
 
 var allowedSortFields = map[string]string{
-    "id":          "id",
-    "created_at":  "created_at",
-    "modified_at": "modified_at",
-    "name":        "name",
+	"id":          "id",
+	"created_at":  "created_at",
+	"modified_at": "modified_at",
+	"name":        "name",
 }
 
 func (r *Repo) getConditions(pars *model.ListReq) (map[string]any, map[string][]any) {
-    conditions := make(map[string]any, 10)
-    conditionExps := make(map[string][]any, 10)
+	conditions := make(map[string]any, 10)
+	conditionExps := make(map[string][]any, 10)
 
-    if pars == nil {
-        return conditions, conditionExps
-    }
+	if pars == nil {
+		return conditions, conditionExps
+	}
 
-    // Точное совпадение:
-    // if pars.Active != nil { conditions["active"] = *pars.Active }
+	// точное совпадение
+	if pars.Active != nil {
+		conditions["active"] = *pars.Active
+	}
+	// ILIKE поиск
+	if pars.Name != nil {
+		conditionExps["name ILIKE ?"] = []any{"%" + *pars.Name + "%"}
+	}
+	// IN по массиву
+	if pars.IDs != nil {
+		conditions["id"] = *pars.IDs
+	}
 
-    // ILIKE поиск:
-    // if pars.Name != nil { conditionExps["name ILIKE ?"] = []any{"%" + *pars.Name + "%"} }
-
-    // IN по массиву:
-    // if pars.IDs != nil { condition["id"] = pars.IDs }
-
-    return conditions, conditionExps
+	return conditions, conditionExps
 }
 
-// Bulk операция (squirrel)
-func (r *Repo) DeleteByFilter(ctx context.Context, field string) error {
-    query, args, err := r.QB.
-        Delete("<table_name>").
-        Where(sq.Eq{"<column>": field}).
-        ToSql()
-    if err != nil {
-        return fmt.Errorf("DeleteByFilter build query: %w", err)
-    }
-    if _, err = r.Con.Exec(ctx, query, args...); err != nil {
-        return fmt.Errorf("DeleteByFilter: %w", err)
-    }
-    return nil
+// Bulk операция (squirrel) — по необходимости
+func (r *Repo) DeleteByFilter(ctx context.Context, value string) error {
+	query, args, err := r.QB.
+		Delete("<entity>").
+		Where(sq.Eq{"<column>": value}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("DeleteByFilter build query: %w", err)
+	}
+	if _, err = r.Con.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("DeleteByFilter: %w", err)
+	}
+	return nil
 }
 ```
+
+> `context`, `fmt` и `sq` нужны только с кастомными запросами — без `DeleteByFilter` убери их
+> из импортов.
 
 ---
 
@@ -418,14 +470,14 @@ func (r *Repo) DeleteByFilter(ctx context.Context, field string) error {
 
 ```go
 func (r *Repo) MethodName(ctx context.Context, ...) (_ RetType, finalError error) {
-    tracingSpan, ctx := opentracing.StartSpanFromContext(ctx, "<entity>.repo.DB.MethodName")
-    defer tracingSpan.Finish()
-    defer func() {
-        if finalError != nil {
-            tracingSpan.SetTag("error", true)
-            tracingSpan.LogKV("error", finalError.Error())
-        }
-    }()
-    // ...
+	tracingSpan, ctx := opentracing.StartSpanFromContext(ctx, "<entity>.repo.DB.MethodName")
+	defer tracingSpan.Finish()
+	defer func() {
+		if finalError != nil {
+			tracingSpan.SetTag("error", true)
+			tracingSpan.LogKV("error", finalError.Error())
+		}
+	}()
+	// ...
 }
 ```

@@ -6,16 +6,23 @@ gRPC + HTTP-gateway контракт для CRUD-сущности. После р
 
 | Что | Правило |
 |---|---|
-| Файл | `api/proto/<svc_name>_v1/<entity>.proto` |
-| Package | `<svc_name>_v1` |
+| Файл | `api/proto/<svc_name>_v1/<entity>.proto` — по файлу на сущность |
+| Package | `<svc_name>_v1` (общий для всех сущностей сервиса) |
 | go_package | `/<svc_name>_v1` |
-| HTTP URL | snake_case множественного числа: `/entities` |
-| Поля Update | `optional` для partial update (proto3 optional) |
+| Service | `<Entity>Service` — свой сервис на каждую сущность |
+| RPC | `List`, `Get`, `Create`, `Update`, `Delete` |
+| Messages | с префиксом: `<Entity>Main`, `<Entity>ListReq`, `<Entity>ListRep`, `<Entity>GetReq`, `<Entity>CreateReq`, `<Entity>CreateRep`, `<Entity>UpdateReq` |
+| Get | возвращает `<Entity>Main` напрямую |
+| Delete | принимает `<Entity>GetReq`; `<Entity>DeleteReq` — когда появятся свои поля |
+| Update / Delete | возвращают `google.protobuf.Empty`; `<Entity>UpdateRep` / `<Entity>DeleteRep` — когда нужно что-то вернуть |
+| Поля Create / Update | **все** `optional` (partial create и partial update) |
+| HTTP | только если сервису нужен HTTP (см. «Транспорт» в `SKILL.md`) |
+| HTTP URL | единственное число, без plural: `/<entity>`, `/<entity>/{id}` |
+| HTTP update | `put` (не `patch`) |
 | Timestamps | `google.protobuf.Timestamp` |
-| List params | `common.ListParamsSt` из `common/common.proto` |
-| Pagination | `common.PaginationInfoSt` из `common/common.proto` |
+| List params / Pagination | `common.ListParamsSt` / `common.PaginationInfoSt` из `common/common.proto` |
 
-## Шаблон
+## Шаблон (кейс PK 1, gRPC + HTTP)
 
 ```proto
 syntax = "proto3";
@@ -29,101 +36,142 @@ import "common/common.proto";
 
 option go_package = "/<svc_name>_v1";
 
-// REST-пути всегда в единственном числе, без plural: `/<entity>`, `/<entity>/{id}`.
 service <Entity>Service {
-  rpc List<Entity>s(List<Entity>sRequest) returns (List<Entity>sResponse) {
+  rpc List(<Entity>ListReq) returns (<Entity>ListRep) {
     option (google.api.http) = {
       get: "/<entity>"
     };
   }
 
-  rpc Get<Entity>(Get<Entity>Request) returns (Get<Entity>Response) {
+  rpc Get(<Entity>GetReq) returns (<Entity>Main) {
     option (google.api.http) = {
       get: "/<entity>/{id}"
     };
   }
 
-  // Create возвращает id созданной записи (правило для всех сущностей с id)
-  rpc Create<Entity>(Create<Entity>Request) returns (Create<Entity>Response) {
+  // Create возвращает id созданной записи
+  rpc Create(<Entity>CreateReq) returns (<Entity>CreateRep) {
     option (google.api.http) = {
       post: "/<entity>"
       body: "*"
     };
   }
 
-  rpc Update<Entity>(Update<Entity>Request) returns (google.protobuf.Empty) {
+  rpc Update(<Entity>UpdateReq) returns (google.protobuf.Empty) {
     option (google.api.http) = {
       put: "/<entity>/{id}"
       body: "*"
     };
   }
 
-  rpc Delete<Entity>(Delete<Entity>Request) returns (google.protobuf.Empty) {
+  rpc Delete(<Entity>GetReq) returns (google.protobuf.Empty) {
     option (google.api.http) = {
       delete: "/<entity>/{id}"
     };
   }
 }
 
-// ── Messages ────────────────────────────────────────────
-
 message <Entity>Main {
-  string id = 1;
-  string name = 2;
-  google.protobuf.Timestamp created_at = 3;
-  google.protobuf.Timestamp updated_at = 4;
+  <idType> id = 1;
+  google.protobuf.Timestamp created_at = 2;
+  google.protobuf.Timestamp modified_at = 3;
+  string name = 4;
+  bool active = 5;
 }
 
 // List
 
-message List<Entity>sRequest {
+message <Entity>ListReq {
   common.ListParamsSt list_params = 1;
-  optional string name = 2;        // фильтр (опционально)
-  repeated string ids = 3;         // фильтр по массиву id (опционально)
+  optional bool active = 2;      // фильтр (опционально)
+  optional string name = 3;      // фильтр ILIKE (опционально)
+  repeated <idType> ids = 4;     // фильтр по массиву id (опционально)
 }
 
-message List<Entity>sResponse {
+message <Entity>ListRep {
   common.PaginationInfoSt pagination_info = 1;
   repeated <Entity>Main results = 2;
 }
 
-// Get
+// Get (и Delete)
 
-message Get<Entity>Request {
-  string id = 1;
+message <Entity>GetReq {
+  <idType> id = 1;
 }
 
-message Get<Entity>Response {
-  <Entity>Main <entity> = 1;
+// Create — все поля optional: не передали → DB-default; обязательность проверяет usecase
+
+message <Entity>CreateReq {
+  optional string name = 1;
+  optional bool active = 2;
 }
 
-// Create
-
-message Create<Entity>Request {
-  string name = 1;
-  // другие обязательные поля
-}
-
-// Create возвращает id новой записи. Тип id соответствует PK сущности:
-//   int64  — для bigserial; string — для text/uuid.
-message Create<Entity>Response {
-  string id = 1; // или int64 id = 1; для bigserial
+message <Entity>CreateRep {
+  <idType> id = 1;
 }
 
 // Update — все изменяемые поля optional для partial update
 
-message Update<Entity>Request {
-  string id = 1;
+message <Entity>UpdateReq {
+  <idType> id = 1;
   optional string name = 2;
-  // другие изменяемые поля
-}
-
-// Delete
-
-message Delete<Entity>Request {
-  string id = 1;
+  optional bool active = 3;
 }
 ```
+
+## Только gRPC
+
+Убери `import "google/api/annotations.proto";` и все блоки `option (google.api.http)`:
+
+```proto
+service <Entity>Service {
+  rpc List(<Entity>ListReq) returns (<Entity>ListRep);
+  rpc Get(<Entity>GetReq) returns (<Entity>Main);
+  rpc Create(<Entity>CreateReq) returns (<Entity>CreateRep);
+  rpc Update(<Entity>UpdateReq) returns (google.protobuf.Empty);
+  rpc Delete(<Entity>GetReq) returns (google.protobuf.Empty);
+}
+```
+
+`make generate-proto` тогда не создаёт `<entity>.pb.gw.go`, и `Register<Entity>ServiceHandler` нет.
+
+## id в Create (кейсы PK 3–5)
+
+Добавь в `<Entity>CreateReq` поле `id` (свободный номер — в конце):
+
+```proto
+message <Entity>CreateReq {
+  optional string name = 1;
+  optional bool active = 2;
+  optional <idType> id = 3;  // из запроса; обязательность (кейсы 3, 4) проверяет usecase
+}
+```
+
+## Смена PK через PUT
+
+По умолчанию id через Update не меняется. Если меняться должен: в пути `{req_id}` — текущий id
+(механика бэка, фронт о нём не знает), а новое значение приходит в body в привычном поле `id`.
+
+```proto
+  rpc Update(<Entity>UpdateReq) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      put: "/<entity>/{req_id}"
+      body: "*"
+    };
+  }
+
+message <Entity>UpdateReq {
+  <idType> req_id = 1;          // текущий id — из пути
+  optional <idType> id = 2;     // новое значение id — из body
+  optional string name = 3;
+  optional bool active = 4;
+}
+```
+
+Почему не `{id}` в пути и `id` в body: gateway сначала разбирает body, потом перезаписывает поле
+значением из пути, и новый id из body теряется.
+
+Если на PK ссылаются другие таблицы, у их FK нужен `on update cascade`, иначе Postgres откажет в смене.
 
 ## После создания proto
 
@@ -131,54 +179,34 @@ message Delete<Entity>Request {
 make generate-proto
 ```
 
-Это создаёт/обновляет файлы в `pkg/proto/<svc_name>_v1/`:
+Это создаёт/обновляет файлы в `pkg/proto/<svc_name>_v1/` и `docs/api.swagger.json`:
 - `<entity>.pb.go` — сообщения
-- `<entity>_grpc.pb.go` — интерфейс сервиса
-- `<entity>.pb.gw.go` — HTTP-gateway роутинг
+- `<entity>_grpc.pb.go` — `<Entity>ServiceServer`, `Unsafe<Entity>ServiceServer`, `Register<Entity>ServiceServer`
+- `<entity>.pb.gw.go` — HTTP-gateway `Register<Entity>ServiceHandler` (только при HTTP-аннотациях)
 
-## Регистрация нового Service в Makefile
-
-Если добавляешь **новый** `.proto` файл в существующий пакет — ничего менять не надо,
-`make generate-proto` подхватит все файлы из `api/proto/<svc_name>_v1/`.
-
-Если добавляешь **новый пакет** (новый `<svc_name>_v1`) — проверь Makefile:
-```makefile
-SERVICE_NAME = <svc_name>_v1   # должен совпадать с именем папки в api/proto/
-```
+Новый `.proto` в существующем пакете подхватывается автоматически. Для **нового пакета**
+проверь `SERVICE_NAME = <svc_name>_v1` в Makefile — должен совпадать с папкой в `api/proto/`.
 
 ## Привязка к Go-коду
 
-В handler `<entity>.go` импортируй сгенерированный пакет:
-
 ```go
 import (
-    proto "github.com/<module>/pkg/proto/<svc_name>_v1"
-    commonProto "github.com/<module>/pkg/proto/common"
+	"github.com/<module>/pkg/proto/common"
+	proto "github.com/<module>/pkg/proto/<svc_name>_v1" // в handler и dto
 )
 ```
 
-Регистрация в `internal/app/app.go`:
+Регистрация в `internal/app/app.go` — см. `SKILL.md`.
 
-```go
-proto.Register<Entity>ServiceServer(grpcServer, <entity>Handler)
-```
+## Маппинг proto → Go
 
-## Маппинг DTO в handler
+| proto | Go (сгенерированный) | В domain |
+|---|---|---|
+| `optional string` / `optional bool` / `optional int64` | `*string` / `*bool` / `*int64` | `v.X` как есть |
+| `string` / `int64` (id в `GetReq`) | `string` / `int64` | `v.GetId()` |
+| `repeated <idType>` | `[]<idType>` (пустой список приходит как `nil`) | `lo.EmptyableToPtr(v.GetIds())` → `*[]<idType>` |
+| `google.protobuf.Timestamp` | `*timestamppb.Timestamp` | `.AsTime()` ↔ `timestamppb.New(t)` |
+| `common.ListParamsSt` | `*common.ListParamsSt` | `dto.DecodeListParams(v.GetListParams())` |
+| `google.protobuf.Struct` | `*structpb.Struct` | `dto.GrpcStructToJsonObj(v)` ↔ `dto.JsonObjToGrpcStruct(b)` (`[]byte` JSON) |
 
-| proto тип | Go тип |
-|---|---|
-| `string` | `string` |
-| `optional string` | `*string` (можно nil) |
-| `google.protobuf.Timestamp` | `*timestamppb.Timestamp` → `time.Time` через `.AsTime()` |
-| `common.ListParamsSt` | декодируй через `dto.DecodeListParams(v.ListParams)` |
-| `repeated string` | `[]string` |
-
-Конвертация timestamp в dto:
-
-```go
-// proto → domain
-obj.CreatedAt = v.CreatedAt.AsTime()
-
-// domain → proto
-CreatedAt: timestamppb.New(v.CreatedAt),
-```
+> В JSON gateway отдаёт `int64` строкой (`"id":"1"`) — это стандарт protojson.
