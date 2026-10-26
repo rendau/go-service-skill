@@ -34,7 +34,7 @@ description: >
 
 | Назначение | Библиотека |
 |---|---|
-| Основной CRUD поверх pgx | `github.com/mechta-market/mobone/v2` |
+| Основной CRUD поверх pgx | `github.com/rendau/mobone/v2` |
 | Сложные/кастомные запросы | `github.com/Masterminds/squirrel` |
 | Прямой доступ к БД | `github.com/jackc/pgx/v5` |
 | Хелперы (маппинг, указатели) | `github.com/samber/lo` |
