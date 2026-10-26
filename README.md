@@ -10,24 +10,18 @@
 
 ## Смежные скиллы
 
-Оба скилла этого репозитория ссылаются на два внешних скилла — поставьте и их, иначе Claude
-не увидит правил repo-слоя и работы с `samber/lo`.
+Оба скилла этого репозитория ссылаются на два внешних скилла — без них Claude не увидит правил
+repo-слоя и работы с `samber/lo`. `install.sh` ставит их сам.
 
 | Скилл | Про что | Откуда |
 |---|---|---|
-| `mobone` | Repo-слой на `mobone.ModelStore` — то, что `crud` использует в `repo/db/` | [`rendau/mobone`](https://github.com/rendau/mobone), скилл лежит внутри репозитория библиотеки в `.claude/skills/mobone` |
-| `golang-samber-lo` | Функциональные хелперы `samber/lo` — `lo.Map`/`lo.Filter` в конвертерах DTO ↔ domain | [`samber/cc-skills-golang`](https://github.com/samber/cc-skills-golang), скилл в `skills/golang-samber-lo` |
+| `mobone` | Repo-слой на `mobone.ModelStore` — то, что `crud` использует в `repo/db/` | [`rendau/mobone`](https://github.com/rendau/mobone), папка `.claude/skills/mobone` внутри репозитория библиотеки |
+| `golang-samber-lo` | Функциональные хелперы `samber/lo` — `lo.Map`/`lo.Filter` в конвертерах DTO ↔ domain | [`samber/cc-skills-golang`](https://github.com/samber/cc-skills-golang), папка `skills/golang-samber-lo` |
 
-```bash
-git clone https://github.com/rendau/mobone.git ~/projects/rendau/mobone
-ln -s ~/projects/rendau/mobone/.claude/skills/mobone ~/.claude/skills/mobone
-
-git clone https://github.com/samber/cc-skills-golang.git ~/projects/cc-skills-golang
-ln -s ~/projects/cc-skills-golang/skills/golang-samber-lo ~/.claude/skills/golang-samber-lo
-```
-
-`install.sh` эти скиллы не ставит (они не наши), но проверяет их наличие и печатает
-эти же команды, если чего-то не хватает.
+Из каждого репозитория скачивается только папка нужного скилла — без истории и без остальных
+файлов (`git clone --depth=1 --filter=blob:none` + sparse-checkout). Из набора
+`cc-skills-golang` в `~/.claude/skills` попадает один `golang-samber-lo` (без служебной папки
+`evals/`), остальные скиллы samber не скачиваются и не занимают контекст агента.
 
 ## Установка
 
@@ -37,8 +31,20 @@ cd ~/projects/go-service-skill
 ./install.sh
 ```
 
-`install.sh` создаёт симлинки на `skills/*` в `~/.claude/skills/`, поэтому скиллы доступны
-во всех проектах. После установки перезапустите Claude Code.
+Что делает `install.sh`:
+
+- скиллы этого репозитория (`skills/*`) подключает симлинками в `~/.claude/skills/` — они
+  доступны во всех проектах и обновляются вместе с репозиторием;
+- смежные скиллы скачивает в `.external/` внутри репозитория (папка в `.gitignore`) и тоже
+  подключает симлинками;
+- если смежный скилл у вас уже стоит своей копией (симлинк на свой клон `mobone` или обычная
+  папка) — оставляет её как есть;
+- если по имени скилла этого репозитория лежит обычная папка (старая локальная копия) — не
+  трогает её и просит удалить или переименовать;
+- убирает симлинки на скиллы, которые из репозитория удалили.
+
+После установки перезапустите Claude Code. Если что-то не поставилось, скрипт пишет строку
+с `!!` и завершается с ошибкой.
 
 Если каталог скиллов у вас в нестандартном месте:
 
@@ -46,29 +52,23 @@ cd ~/projects/go-service-skill
 CLAUDE_SKILLS_DIR=/путь/к/skills ./install.sh
 ```
 
-Скрипт идемпотентен: повторный запуск обновляет симлинки. Если по имени скилла уже лежит
-обычная папка (старая локальная копия), скрипт её не тронет — удалите или переименуйте её сами
-и запустите скрипт ещё раз. В конце скрипт проверяет [смежные скиллы](#смежные-скиллы)
-`mobone` и `golang-samber-lo` и подсказывает команды установки, если их нет.
-
 ### Только для одного проекта
 
 Вместо глобальной установки можно подключить скиллы к конкретному репозиторию:
 
 ```bash
-ln -s ~/projects/go-service-skill/skills/crud .claude/skills/crud
-ln -s ~/projects/go-service-skill/skills/golang-service .claude/skills/golang-service
+CLAUDE_SKILLS_DIR=/путь/к/проекту/.claude/skills ~/projects/go-service-skill/install.sh
 ```
 
 ## Обновление
 
 ```bash
-cd ~/projects/go-service-skill && git pull
+cd ~/projects/go-service-skill && git pull && ./install.sh
 ```
 
-Симлинки уже указывают на репозиторий — после `git pull` и перезапуска Claude Code
-у вас актуальная версия. Заново запускать `install.sh` нужно только если в репозитории
-появился новый скилл.
+`git pull` обновляет скиллы этого репозитория (симлинки уже указывают на него),
+`./install.sh` — подтягивает свежие версии смежных скиллов и подключает новые скиллы, если они
+появились. Затем перезапустите Claude Code.
 
 ## Как вносить изменения
 
@@ -104,4 +104,8 @@ skills/
     SKILL.md
     references/        # http-client
 install.sh
+.external/             # смежные скиллы, скачивает install.sh (в git не попадает)
 ```
+
+Чтобы добавить или поменять смежный скилл, правьте список `EXTERNALS` в начале `install.sh`:
+имя скилла, git-репозиторий, путь к папке скилла в нём и подпапки, которые скачивать не нужно.
