@@ -1,7 +1,7 @@
 # go-service-skill
 
 Общие скиллы Claude Code для Go-сервисов Mechta (Clean Architecture + DDD на базе
-[`gotemplate`](https://github.com/mechta-market/gotemplate)).
+[`gotemplate`](https://github.com/rendau/gotemplate)).
 
 | Скилл | Про что |
 |---|---|
@@ -32,7 +32,7 @@ ln -s ~/projects/cc-skills-golang/skills/golang-samber-lo ~/.claude/skills/golan
 ## Установка
 
 ```bash
-git clone git@github.com:mechta-market/go-service-skill.git ~/projects/go-service-skill
+git clone git@github.com:rendau/go-service-skill.git ~/projects/go-service-skill
 cd ~/projects/go-service-skill
 ./install.sh
 ```
