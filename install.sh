@@ -55,8 +55,8 @@ if [ ${#missing[@]} -gt 0 ]; then
 Без них Claude не увидит правил repo-слоя (mobone.ModelStore) и работы с samber/lo.
 
   # mobone — скилл лежит в самом репозитории библиотеки
-  git clone https://github.com/rendau/mobone.git ~/projects/mobone
-  ln -s ~/projects/mobone/.claude/skills/mobone $TARGET_DIR/mobone
+  git clone https://github.com/rendau/mobone.git ~/projects/rendau/mobone
+  ln -s ~/projects/rendau/mobone/.claude/skills/mobone $TARGET_DIR/mobone
 
   # golang-samber-lo — из набора скиллов samber/cc-skills-golang
   git clone https://github.com/samber/cc-skills-golang.git ~/projects/cc-skills-golang

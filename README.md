@@ -19,8 +19,8 @@
 | `golang-samber-lo` | Функциональные хелперы `samber/lo` — `lo.Map`/`lo.Filter` в конвертерах DTO ↔ domain | [`samber/cc-skills-golang`](https://github.com/samber/cc-skills-golang), скилл в `skills/golang-samber-lo` |
 
 ```bash
-git clone https://github.com/rendau/mobone.git ~/projects/mobone
-ln -s ~/projects/mobone/.claude/skills/mobone ~/.claude/skills/mobone
+git clone https://github.com/rendau/mobone.git ~/projects/rendau/mobone
+ln -s ~/projects/rendau/mobone/.claude/skills/mobone ~/.claude/skills/mobone
 
 git clone https://github.com/samber/cc-skills-golang.git ~/projects/cc-skills-golang
 ln -s ~/projects/cc-skills-golang/skills/golang-samber-lo ~/.claude/skills/golang-samber-lo
